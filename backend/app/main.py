@@ -99,12 +99,14 @@ class LintAutofixBody(BaseModel):
 
 class ModularizeBody(BaseModel):
     path: str
+    paths: List[str] = []
     prompt: str
     model: str = ""
 
 
 class TestGenBody(BaseModel):
     path: str
+    paths: List[str] = []
     prompt: str
     model: str = ""  # defaults to the session's currently selected model
 
@@ -464,19 +466,27 @@ async def lint_explain(name: str, body: FindingBody):
 
 @app.post("/api/ws/{name}/lint/fix-finding", dependencies=[Depends(check_auth)])
 async def lint_fix_finding(name: str, body: FindingBody):
-    """Produce a reviewable diff for exactly one error/refactor with full file context."""
+    """Fix one finding in an isolated Aider session and commit its review copy."""
     workspace_path = wsm.workspace_path(name)
     try:
-        file_content = safe_resolve(workspace_path, body.path).read_text(errors="replace")
+        original = safe_resolve(workspace_path, body.path)
+        if not original.is_file():
+            raise OSError("File not found")
+        review_path = original.with_name(f"fix_{original.name}")
+        review_path.write_text(original.read_text(errors="replace"))
+        rel_review = str(review_path.relative_to(workspace_path))
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     f = body.finding
-    instruction = (f"Fix only this {f.get('type', 'analysis')} finding: [{f.get('symbol')}] {f.get('message')} "
-                   f"at line {f.get('line')}, column {f.get('column')}. Preserve behavior and return a complete file.")
-    result = await run_file_transform(settings.ollama_api_base, body.model or get_session(name).status.model,
-                                      file_content, body.path, instruction)
-    if not result["ok"]:
-        raise HTTPException(status_code=502, detail=f"Ollama request failed: {result.get('error')}")
+    prompt = (f"Fix only this {f.get('type', 'analysis')} finding in `{rel_review}`: "
+              f"[{f.get('symbol')}] {f.get('message')} at line {f.get('line')}, column {f.get('column')}. "
+              "Keep behavior unchanged. Edit the attached review copy and commit the result.")
+    result = await _run_tool_task(name, "lintfix", rel_review, prompt)
+    result.update({"path": body.path, "reviewPath": rel_review, "committed": bool(result.get("commits"))})
+    try:
+        result["result"] = review_path.read_text(errors="replace")
+    except OSError:
+        result["result"] = ""
     return result
 
 
@@ -499,18 +509,20 @@ async def pylint_report_pdf(name: str, path: str):
     return Response(pdf.encode(), media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="pylint-report.pdf"'})
 
 
-async def _run_tool_task(name: str, purpose: str, path: str, prompt: str) -> dict:
+async def _run_tool_task(name: str, purpose: str, path: str, prompt: str, paths: List[str] | None = None) -> dict:
     """Shared plumbing for the Modularization and Test-Gen tools: get (or
     lazily start) this workspace's dedicated hidden session for `purpose`,
     submit the task, and wait for it to finish -- returning the diff
     directly rather than requiring the caller to watch a live status feed."""
     workspace_path = wsm.workspace_path(name)
-    try:
-        safe_resolve(workspace_path, path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    if not (workspace_path / path).is_file():
-        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    paths = paths or [path]
+    for item in paths:
+        try:
+            safe_resolve(workspace_path, item)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if not (workspace_path / item).is_file():
+            raise HTTPException(status_code=404, detail=f"File not found: {item}")
 
     try:
         session = wsm.get_tool_session(name, purpose)
@@ -530,7 +542,7 @@ async def _run_tool_task(name: str, purpose: str, path: str, prompt: str) -> dic
             raise HTTPException(status_code=504, detail="Aider did not become ready in time.")
 
     try:
-        session.start_task(prompt, [path])
+        session.start_task(prompt, paths)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
 
@@ -549,7 +561,7 @@ async def task_modularize(name: str, body: ModularizeBody):
     """Modularization goes through Aider -- but a dedicated hidden session
     for this workspace, completely separate from the visible Aider Console
     session, so using this tool never interrupts an active console chat."""
-    return await _run_tool_task(name, "modularize", body.path, body.prompt)
+    return await _run_tool_task(name, "modularize", body.path, body.prompt, body.paths)
 
 
 # --------------------------------------------------------------------------- test generation (via Aider, isolated session)
@@ -558,8 +570,8 @@ async def task_testgen(name: str, body: TestGenBody):
     """Test generation also goes through Aider, via its own dedicated hidden
     session (separate from both the console and the modularize session).
     Asks Aider to create a NEW test file rather than modifying the source."""
-    prompt = f"Create a NEW test file for `{body.path}` (do not modify the original file). {body.prompt}"
-    return await _run_tool_task(name, "testgen", body.path, prompt)
+    prompt = f"Create NEW test file(s) for the attached source file(s) (do not modify originals). {body.prompt}"
+    return await _run_tool_task(name, "testgen", body.path, prompt, body.paths)
 
 
 @app.get("/api/ws/{name}/tasks/{purpose}/status", dependencies=[Depends(check_auth)])
@@ -567,7 +579,7 @@ async def tool_task_status(name: str, purpose: str):
     """Polling endpoint for the hidden tool sessions. The visible console
     socket is intentionally separate, so Modularization and Test Generation
     use this endpoint to render live Aider phases while their request waits."""
-    if purpose not in ("modularize", "testgen"):
+    if purpose not in ("modularize", "testgen", "lintfix"):
         raise HTTPException(status_code=400, detail="Unknown tool session.")
     try:
         session = wsm.get_tool_session(name, purpose)
@@ -578,9 +590,38 @@ async def tool_task_status(name: str, purpose: str):
     return status
 
 
+@app.post("/api/ws/{name}/tasks/{purpose}/prompt", dependencies=[Depends(check_auth)])
+async def tool_task_prompt(name: str, purpose: str, body: PromptBody):
+    if purpose not in ("modularize", "testgen", "lintfix"):
+        raise HTTPException(status_code=400, detail="Unknown tool session.")
+    try:
+        wsm.get_tool_session(name, purpose).send_input(body.text)
+        return {"ok": True}
+    except (KeyError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/ws/{name}/tasks/{purpose}/clear", dependencies=[Depends(check_auth)])
+async def tool_task_clear(name: str, purpose: str):
+    try:
+        wsm.get_tool_session(name, purpose).clear_chat()
+        return {"ok": True}
+    except (KeyError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/ws/{name}/tasks/{purpose}/tokens", dependencies=[Depends(check_auth)])
+async def tool_task_tokens(name: str, purpose: str):
+    try:
+        wsm.get_tool_session(name, purpose).request_tokens()
+        return {"ok": True}
+    except (KeyError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @app.post("/api/ws/{name}/tasks/{purpose}/answer", dependencies=[Depends(check_auth)])
 async def tool_task_answer(name: str, purpose: str, body: AnswerBody):
-    if purpose not in ("modularize", "testgen"):
+    if purpose not in ("modularize", "testgen", "lintfix"):
         raise HTTPException(status_code=400, detail="Unknown tool session.")
     try:
         wsm.get_tool_session(name, purpose).answer_question(body.text)
@@ -591,7 +632,7 @@ async def tool_task_answer(name: str, purpose: str, body: AnswerBody):
 
 @app.post("/api/ws/{name}/tasks/{purpose}/undo", dependencies=[Depends(check_auth)])
 async def task_undo(name: str, purpose: str):
-    if purpose not in ("modularize", "testgen"):
+    if purpose not in ("modularize", "testgen", "lintfix"):
         raise HTTPException(status_code=400, detail="Unknown tool session.")
     try:
         session = wsm.get_tool_session(name, purpose)

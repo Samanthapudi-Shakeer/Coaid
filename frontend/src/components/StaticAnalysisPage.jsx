@@ -73,7 +73,7 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
   }
 
   async function showLocation(finding) {
-    try { const data = await apiGet(wsApi(`/files/raw/${finding.path || target}`)); setSource({ path: finding.path || target, line: finding.line, content: data.content }); }
+    try { const data = await apiGet(wsApi(`/files/raw/${finding.path || target}`)); const line = Number(finding.line || 1); const rows = data.content.split('\n'); setSource({ path: finding.path || target, line, start: Math.max(1, line - 3), rows: rows.slice(Math.max(0, line - 4), line + 3) }); }
     catch (err) { toast(err.message, 'error'); }
   }
   async function askAi(finding) {
@@ -157,8 +157,8 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
           </div>
         )}
 
-        {source && <div className="tool-card"><div className="tool-card-header"><span>{source.path} — line {source.line}</span><button className="btn small" onClick={() => setSource(null)}>Close</button></div><pre className="source-preview">{source.content.split('\n').map((line, index) => `${String(index + 1).padStart(5)} ${line}`).join('\n')}</pre></div>}
-        {aiResult && <div className="tool-card"><div className="tool-card-header"><span>{aiResult.kind} ({aiResult.model})</span><button className="btn small" onClick={() => setAiResult(null)}>Close</button>{aiResult.changed && <button className="btn small primary" onClick={() => { setFixResult(aiResult); setSaveOpen(true); }}>Review / apply diff</button>}</div>{aiResult.explanation ? <p>{aiResult.explanation}</p> : aiResult.changed ? <DiffView diff={aiResult.diff} /> : <div className="empty">No change was proposed.</div>}</div>}
+        {source && <div className="tool-card"><div className="tool-card-header"><span>{source.path} — lines {source.start}–{source.start + source.rows.length - 1}</span><button className="btn small" onClick={() => setSource(null)}>Close</button></div><pre className="source-preview">{source.rows.map((line, index) => `${String(source.start + index).padStart(5)} ${line}`).join('\n')}</pre></div>}
+        {aiResult && <div className="tool-card"><div className="tool-card-header"><span>{aiResult.kind} ({aiResult.model || 'Aider'}){aiResult.committed ? ' — committed review copy' : ''}</span><button className="btn small" onClick={() => setAiResult(null)}>Close</button>{aiResult.changed && <button className="btn small primary" onClick={() => { setFixResult(aiResult); setSaveOpen(true); }}>Review / apply diff</button>}</div>{aiResult.explanation ? <p>{aiResult.explanation}</p> : aiResult.changed ? <DiffView diff={aiResult.diff} /> : <div className="empty">No change was proposed.</div>}</div>}
 
         {fixResult && (
           <div className="tool-card">
@@ -166,7 +166,7 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
               <span>Proposed fix ({fixResult.model})</span>
               {fixResult.changed && (
                 <>
-                  <button className="btn small primary" onClick={() => save(target)}>✓ Apply to original</button>
+                  <button className="btn small primary" onClick={() => save(fixResult.path || target)}>✓ Apply to original</button>
                   <button className="btn small" onClick={() => setSaveOpen(true)}>Save as…</button>
                 </>
               )}
