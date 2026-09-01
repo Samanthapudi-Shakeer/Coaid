@@ -38,7 +38,7 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
     setFindings(null);
     setFixResult(null);
     try {
-      const result = await apiPost(wsApi('/lint/analyze'), { path: target, engine });
+      const result = await apiPost(wsApi('/lint/analyze'), { path: target, engine, sonarUrl: sonar.url, sonarToken: sonar.token, sonarProject: sonar.project });
       setFindings(result.findings);
       toast(`Found ${result.findings.length} issue(s)`, result.findings.length ? 'info' : 'success');
     } catch (err) {
@@ -118,6 +118,8 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
 
 
       <div className="tool-actions">
+        <label className="btn small upload-btn">Upload file(s)<input type="file" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label>
+        <label className="btn small upload-btn">Upload folder<input type="file" webkitdirectory="" directory="" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label>
         <button className="btn primary" onClick={analyze} disabled={!target || analyzing}>
           {analyzing ? 'Analyzing…' : `▶ Run ${engine}`}
         </button>

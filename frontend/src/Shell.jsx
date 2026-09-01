@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { apiGet, apiPost } from './api';
+import { apiGet, apiPost, apiUpload } from './api';
 import App from './App.jsx';
 import StaticAnalysisPage from './components/StaticAnalysisPage.jsx';
 import ModularizationPage from './components/ModularizationPage.jsx';
@@ -78,6 +78,7 @@ export default function Shell() {
             {p.label}
           </button>
         ))}
+        <label className="workspace-folder-button" title="Add files or a folder to the selected workspace">📁 Workspace<input type="file" multiple hidden onChange={(e) => { uploadToWorkspace(e.target.files).catch(() => {}); e.target.value = ''; }} /></label>
       </nav>
       <div className="shell-body">
         {/* Keep every section mounted. Switching tabs must not cancel requests,
