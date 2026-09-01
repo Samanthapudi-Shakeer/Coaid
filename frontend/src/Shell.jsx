@@ -78,10 +78,12 @@ export default function Shell() {
         ))}
       </nav>
       <div className="shell-body">
-        {page === 'aider' && <App {...workspaceProps} />}
-        {page === 'static-analysis' && <StaticAnalysisPage {...workspaceProps} />}
-        {page === 'modularize' && <ModularizationPage {...workspaceProps} />}
-        {page === 'testgen' && <TestGenPage {...workspaceProps} />}
+        {/* Keep every section mounted. Switching tabs must not cancel requests,
+            discard tool progress, or create a fresh isolated Aider session. */}
+        <div hidden={page !== 'aider'}><App {...workspaceProps} /></div>
+        <div hidden={page !== 'static-analysis'}><StaticAnalysisPage {...workspaceProps} /></div>
+        <div hidden={page !== 'modularize'}><ModularizationPage {...workspaceProps} /></div>
+        <div hidden={page !== 'testgen'}><TestGenPage {...workspaceProps} /></div>
       </div>
     </div>
   );

@@ -341,6 +341,8 @@ class AiderSession:
         self._schedule(self.broadcast({"type": "status", "data": self.get_status()}))
 
     async def restart(self) -> dict:
+        # Make restart self-healing for workspaces restored from disk.
+        git_utils.ensure_repo(Path(self.workspace_dir))
         self.stop()
         await asyncio.sleep(0.4)
         return self.start()

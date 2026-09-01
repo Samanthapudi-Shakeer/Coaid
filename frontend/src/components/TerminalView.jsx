@@ -11,7 +11,7 @@ import '@xterm/xterm/css/xterm.css';
  * chunks decoded straight from the PTY; nothing is reinterpreted or
  * reformatted here.
  */
-export default function TerminalView({ onWriteRef, onResize, initialChunks }) {
+export default function TerminalView({ onWriteRef, onResize, initialChunks, onData }) {
   const containerRef = useRef(null);
   const termRef = useRef(null);
   const fitRef = useRef(null);
@@ -58,6 +58,7 @@ export default function TerminalView({ onWriteRef, onResize, initialChunks }) {
       onWriteRef.current = (bytes) => term.write(bytes);
     }
 
+    const disposable = onData ? term.onData(onData) : null;
     const resizeObserver = new ResizeObserver(() => {
       try {
         fit.fit();
@@ -70,6 +71,7 @@ export default function TerminalView({ onWriteRef, onResize, initialChunks }) {
 
     return () => {
       resizeObserver.disconnect();
+      disposable?.dispose();
       term.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

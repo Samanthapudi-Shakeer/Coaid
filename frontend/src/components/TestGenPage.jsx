@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { apiGet, apiPost } from '../api';
+import React, { useEffect, useState } from 'react';
+import { apiGet, apiPost, apiUpload } from '../api';
 import { useWorkspaceFilesAndModels } from '../hooks/useWorkspaceFilesAndModels';
 import ToolControls from './ToolControls';
 import DiffView from './DiffView';
@@ -15,17 +15,33 @@ const DEFAULT_PROMPT =
 export default function TestGenPage({ workspaces, currentWorkspace, onSelectWorkspace, onCreateWorkspace }) {
   const tw = useWorkspaceFilesAndModels(currentWorkspace);
   const [selectedFile, setSelectedFile] = useState('');
+  const [attachedPaths, setAttachedPaths] = useState([]);
+  const [folder, setFolder] = useState('');
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [toasts, setToasts] = useState([]);
+  const [terminalEnabled, setTerminalEnabled] = useState(false);
 
   const wsApi = (path) => `/api/ws/${encodeURIComponent(currentWorkspace)}${path}`;
+  useEffect(() => {
+    if (!currentWorkspace) return;
+    let alive = true;
+    const restore = async () => { try { const status = await apiGet(wsApi('/tasks/testgen/status')); if (alive && status.taskRunning) setRunning(true); } catch (_) { /* session has not been created yet */ } };
+    restore();
+    return () => { alive = false; };
+  }, [currentWorkspace]);
   const toast = (message, kind = 'info') => {
     const id = ++toastId;
     setToasts((t) => [...t, { id, message, kind }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
   };
+
+  async function handleUpload(fileList) {
+    if (!fileList?.length || !currentWorkspace) return;
+    try { const form = new FormData(); [...fileList].forEach((file) => form.append('files', file)); const body = await apiUpload(wsApi('/upload'), form); await tw.refreshWorkspaceFiles(); const paths = body.uploaded.map((file) => file.name); setSelectedFile(paths[0] || ''); setAttachedPaths(paths); toast(`Uploaded ${paths.length} file(s)`, 'success'); }
+    catch (err) { toast(err.message, 'error'); }
+  }
 
   async function run() {
     if (!selectedFile || !prompt.trim()) return;
@@ -35,7 +51,7 @@ export default function TestGenPage({ workspaces, currentWorkspace, onSelectWork
       // Runs on a dedicated, hidden Aider session for this workspace --
       // separate from the Aider Console -- and blocks until Aider actually
       // creates and commits the new test file.
-      const res = await apiPost(wsApi('/tasks/testgen'), { path: selectedFile, prompt: prompt.trim() });
+      const res = await apiPost(wsApi('/tasks/testgen'), { path: selectedFile, paths: attachedPaths.length ? attachedPaths : [selectedFile], prompt: prompt.trim() });
       // The task endpoint only resolves after Aider reports completion. Still
       // wait for the generated paths to appear in the workspace listing
       // before telling the user it is ready, avoiding a transient "no file"
@@ -82,7 +98,8 @@ export default function TestGenPage({ workspaces, currentWorkspace, onSelectWork
           file directly — on its own dedicated hidden session, separate from the Aider Console.
         </p>
       </div>
-      <ToolTaskProgress running={running} statusPath={wsApi('/tasks/testgen/status')} />
+      <label className="terminal-toggle"><input type="checkbox" checked={terminalEnabled} onChange={(e) => setTerminalEnabled(e.target.checked)} /> Show Aider terminal and answer Y/N prompts</label>
+      <ToolTaskProgress running={running} statusPath={wsApi('/tasks/testgen/status')} terminalEnabled={terminalEnabled} />
 
       <ToolControls
         workspaces={workspaces} currentWorkspace={currentWorkspace}
@@ -90,6 +107,10 @@ export default function TestGenPage({ workspaces, currentWorkspace, onSelectWork
         workspaceFiles={tw.workspaceFiles} selectedFile={selectedFile} onSelectFile={setSelectedFile}
         showModel={false}
       />
+
+      <div className="upload-options"><label className="btn small upload-btn">Upload file(s)<input type="file" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label><label className="btn small upload-btn">Upload folder<input type="file" webkitdirectory="" directory="" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label></div>
+
+      <div className="field multi-attach"><label>Attach related files or an entire folder</label><div className="tool-actions"><select value={folder} onChange={(e) => setFolder(e.target.value)}><option value="">Choose folder</option>{[...new Set(tw.workspaceFiles.map((f) => f.path.includes('/') ? f.path.split('/').slice(0, -1).join('/') : '').filter(Boolean))].map((item) => <option key={item} value={item}>{item}/</option>)}</select><button className="btn small" type="button" disabled={!folder} onClick={() => setAttachedPaths(tw.workspaceFiles.filter((f) => f.path.startsWith(`${folder}/`)).map((f) => f.path))}>Attach folder</button></div><div className="attachment-list">{tw.workspaceFiles.map((f) => <label key={f.path}><input type="checkbox" checked={attachedPaths.includes(f.path)} onChange={(e) => setAttachedPaths((old) => e.target.checked ? [...new Set([...old, f.path])] : old.filter((item) => item !== f.path))} /> {f.path}</label>)}</div></div>
 
       <div className="field">
         <label>What kind of tests do you want? (edit or use the default)</label>
