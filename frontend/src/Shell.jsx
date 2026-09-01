@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { apiGet, apiPost, apiUpload } from './api';
+import { apiGet, apiPost } from './api';
 import App from './App.jsx';
 import StaticAnalysisPage from './components/StaticAnalysisPage.jsx';
 import ModularizationPage from './components/ModularizationPage.jsx';
@@ -56,12 +56,7 @@ export default function Shell() {
     if (currentWorkspace) sessionStorage.setItem(CURRENT_WS_KEY, currentWorkspace);
   }, [currentWorkspace]);
 
-  const uploadToWorkspace = async (files) => {
-    if (!currentWorkspace || !files?.length) return;
-    const form = new FormData(); [...files].forEach((file) => form.append('files', file));
-    await apiUpload(`/api/ws/${encodeURIComponent(currentWorkspace)}/upload`, form);
-    window.dispatchEvent(new Event('workspace-files-changed'));
-  };
+
 
   const workspaceProps = {
     workspaces,
@@ -83,7 +78,6 @@ export default function Shell() {
             {p.label}
           </button>
         ))}
-        <label className="workspace-folder-button" title="Add files or a folder to the selected workspace">📁 Workspace<input type="file" multiple hidden onChange={(e) => { uploadToWorkspace(e.target.files).catch(() => {}); e.target.value = ''; }} /></label>
       </nav>
       <div className="shell-body">
         {/* Keep every section mounted. Switching tabs must not cancel requests,
