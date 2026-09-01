@@ -15,10 +15,13 @@ const DEFAULT_PROMPT =
 export default function ModularizationPage({ workspaces, currentWorkspace, onSelectWorkspace, onCreateWorkspace }) {
   const tw = useWorkspaceFilesAndModels(currentWorkspace);
   const [selectedFile, setSelectedFile] = useState('');
+  const [attachedPaths, setAttachedPaths] = useState([]);
+  const [folder, setFolder] = useState('');
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [toasts, setToasts] = useState([]);
+  const [terminalEnabled, setTerminalEnabled] = useState(false);
 
   const wsApi = (path) => `/api/ws/${encodeURIComponent(currentWorkspace)}${path}`;
   const toast = (message, kind = 'info') => {
@@ -49,7 +52,7 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
       // This runs on a dedicated, hidden Aider session for this workspace --
       // separate from whatever's happening in the Aider Console -- and
       // blocks until Aider actually finishes and commits the change.
-      const res = await apiPost(wsApi('/tasks/modularize'), { path: selectedFile, prompt: prompt.trim() });
+      const res = await apiPost(wsApi('/tasks/modularize'), { path: selectedFile, paths: attachedPaths.length ? attachedPaths : [selectedFile], prompt: prompt.trim() });
       setResult(res);
       toast(
         res.changedFiles?.length ? 'Modularization complete — changes applied and committed' : 'Aider made no changes',
@@ -84,7 +87,8 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
           it never interrupts anything you have running there.
         </p>
       </div>
-      <ToolTaskProgress running={running} statusPath={wsApi('/tasks/modularize/status')} />
+      <label className="terminal-toggle"><input type="checkbox" checked={terminalEnabled} onChange={(e) => setTerminalEnabled(e.target.checked)} /> Show Aider terminal and answer Y/N prompts</label>
+      <ToolTaskProgress running={running} statusPath={wsApi('/tasks/modularize/status')} terminalEnabled={terminalEnabled} />
 
       <ToolControls
         workspaces={workspaces} currentWorkspace={currentWorkspace}
@@ -100,6 +104,8 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
           <input type="file" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
         </label>
       </div>
+
+      <div className="field multi-attach"><label>Attach related files or an entire folder</label><div className="tool-actions"><select value={folder} onChange={(e) => setFolder(e.target.value)}><option value="">Choose folder</option>{[...new Set(tw.workspaceFiles.map((f) => f.path.includes('/') ? f.path.split('/').slice(0, -1).join('/') : '').filter(Boolean))].map((item) => <option key={item} value={item}>{item}/</option>)}</select><button className="btn small" type="button" disabled={!folder} onClick={() => setAttachedPaths(tw.workspaceFiles.filter((f) => f.path.startsWith(`${folder}/`)).map((f) => f.path))}>Attach folder</button></div><div className="attachment-list">{tw.workspaceFiles.map((f) => <label key={f.path}><input type="checkbox" checked={attachedPaths.includes(f.path)} onChange={(e) => setAttachedPaths((old) => e.target.checked ? [...new Set([...old, f.path])] : old.filter((item) => item !== f.path))} /> {f.path}</label>)}</div></div>
 
       <div className="field">
         <label>Prompt (edit or use the default)</label>

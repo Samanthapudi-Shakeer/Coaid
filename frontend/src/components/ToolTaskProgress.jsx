@@ -1,39 +1,49 @@
-import React, { useEffect, useState } from 'react';
-import { apiGet } from '../api';
+import React, { useEffect, useRef, useState } from 'react';
+import { apiGet, apiPost } from '../api';
+import TerminalView from './TerminalView';
+import Composer from './Composer';
 
 const FALLBACK_PHASE = 'Preparing isolated Aider session';
+function decode(raw = []) { try { return raw.map((value) => { const bin = atob(value); return Uint8Array.from(bin, (c) => c.charCodeAt(0)); }); } catch (_) { return []; } }
 
-/** Live progress for the hidden Modularization/Test Generation Aider process. */
-export default function ToolTaskProgress({ running, statusPath }) {
-  const [phases, setPhases] = useState([]);
+/** A real, persisted Aider terminal for a modularize/testgen task session. */
+export default function ToolTaskProgress({ running, statusPath, terminalEnabled = false }) {
+  const [status, setStatus] = useState(null);
+  const [answer, setAnswer] = useState('');
+  const [input, setInput] = useState('');
+  const writeRef = useRef(null);
+  const seenRef = useRef(0);
+  const initialRef = useRef([]);
 
   useEffect(() => {
     if (!running) return undefined;
     let cancelled = false;
     const refresh = async () => {
       try {
-        const status = await apiGet(statusPath);
-        if (!cancelled) setPhases(status.phaseTimeline || []);
-      } catch (_) {
-        // The task request itself reports actionable failures; progress is best effort.
-      }
+        const next = await apiGet(statusPath);
+        const chunks = decode(next.raw);
+        if (!seenRef.current) initialRef.current = chunks;
+        else chunks.slice(seenRef.current).forEach((chunk) => writeRef.current?.(chunk));
+        seenRef.current = chunks.length;
+        if (!cancelled) setStatus(next);
+      } catch (_) { /* the main task request reports actionable failures */ }
     };
-    setPhases([]);
-    refresh();
-    const timer = setInterval(refresh, 700);
+    seenRef.current = 0; initialRef.current = []; setStatus(null); refresh();
+    const timer = setInterval(refresh, 1000);
     return () => { cancelled = true; clearInterval(timer); };
   }, [running, statusPath]);
 
   if (!running) return null;
-  const current = phases[phases.length - 1]?.label || FALLBACK_PHASE;
-  return (
-    <section className="tool-progress" aria-live="polite">
-      <div className="tool-progress-current"><span className="spinner" /> {current}</div>
-      <div className="tool-progress-phases">
-        {phases.length === 0 ? <span>Waiting for Aider to start…</span> : phases.map((phase, index) => (
-          <span key={`${phase.label}-${phase.at}`} className={index === phases.length - 1 ? 'active' : ''}>✓ {phase.label}</span>
-        ))}
-      </div>
-    </section>
-  );
+  const phases = status?.phaseTimeline || [];
+  const current = phases.at(-1)?.label || FALLBACK_PHASE;
+  const question = status?.pendingQuestion;
+  const endpoint = (action) => statusPath.replace('/status', `/${action}`);
+  const send = async (action, payload = {}) => { await apiPost(endpoint(action), payload); };
+  const answerQuestion = async (value) => { if (value.trim()) { await send('answer', { text: value }); setAnswer(''); } };
+  return <section className="tool-progress" aria-live="polite">
+    <div className="tool-progress-current"><span className="spinner" /> {current}</div>
+    <div className="tool-progress-phases">{phases.length === 0 ? <span>Starting Aider…</span> : phases.map((phase, index) => <span key={`${phase.label}-${phase.at}`} className={index === phases.length - 1 ? 'active' : ''}>✓ {phase.label}</span>)}</div>
+    {question && <div className="tool-human-question"><strong>Aider needs your answer:</strong> {question.question || 'Continue?'}<div>{(question.options || [{ key: 'Y', label: 'Y' }, { key: 'N', label: 'N' }]).map((o) => <button className="btn small" key={o.key} onClick={() => answerQuestion(o.key)}>{o.label}</button>)}</div><div className="tool-answer"><input value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Type Y/N or another answer" /><button className="btn small primary" onClick={() => answerQuestion(answer)}>Send</button></div></div>}
+    {terminalEnabled && <div className="tool-aider-console"><div className="tool-terminal-toolbar"><strong>Dedicated Aider terminal</strong><span>Files are attached and your task prompt was sent.</span><button className="btn small" onClick={() => send('clear')}>Clear</button><button className="btn small" onClick={() => send('tokens')}>Tokens</button></div><TerminalView onWriteRef={writeRef} initialChunks={initialRef.current} /><Composer value={input} onChange={setInput} onSend={(text) => { send('prompt', { text }); setInput(''); }} disabled={false} statusLabel={status?.status} /></div>}
+  </section>;
 }
