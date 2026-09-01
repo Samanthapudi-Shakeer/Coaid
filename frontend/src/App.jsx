@@ -438,6 +438,7 @@ export default function App({ workspaces, currentWorkspace, onSelectWorkspace, o
         modifiedFiles={modifiedFiles}
         history={history}
         onDownloadFile={requestDownload}
+        onOpenCodeCanvas={onOpenCodeCanvas}
         onUndo={onUndo}
         onStart={onStart}
         onStop={onStop}

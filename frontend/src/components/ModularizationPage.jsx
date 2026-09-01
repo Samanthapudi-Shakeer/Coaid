@@ -4,6 +4,7 @@ import { useWorkspaceFilesAndModels } from '../hooks/useWorkspaceFilesAndModels'
 import ToolControls from './ToolControls';
 import DiffView from './DiffView';
 import Toasts from './Toasts';
+import ToolTaskProgress from './ToolTaskProgress';
 
 let toastId = 0;
 
@@ -83,6 +84,7 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
           it never interrupts anything you have running there.
         </p>
       </div>
+      <ToolTaskProgress running={running} statusPath={wsApi('/tasks/modularize/status')} />
 
       <ToolControls
         workspaces={workspaces} currentWorkspace={currentWorkspace}

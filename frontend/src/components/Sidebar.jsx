@@ -30,6 +30,7 @@ export default function Sidebar({
   modifiedFiles,
   history,
   onDownloadFile,
+  onOpenCodeCanvas,
   onUndo,
   onStart,
   onStop,
@@ -192,6 +193,7 @@ export default function Sidebar({
                 <span className={`change-dot change-${f.status}`} title={STATUS_BADGE[f.status] || f.status} />
                 <span className="fname" title={f.path}>{f.path}</span>
                 <span className="fsize">{fmtTime(f.changedAt)}</span>
+                <button className="mini" onClick={() => onOpenCodeCanvas(f.path, modifiedFiles.map((entry) => entry.path))} title="Browse this session's versions">Versions</button>
                 <button className="mini mini-download" onClick={() => onDownloadFile(f.path)} title="Download this file">⭳</button>
               </li>
             ))}

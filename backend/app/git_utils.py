@@ -86,6 +86,24 @@ def file_versions(workspace_dir: Path, before_head: str, file_path: str) -> list
     return versions  # already most-recent-first (log_since preserves git log order)
 
 
+def file_versions_for_commits(workspace_dir: Path, commits: list[str], file_path: str) -> list:
+    """Return versions only for commits explicitly recorded by one Aider
+    process.  This keeps Code Canvas isolated when console, modularization,
+    and test-generation sessions share the same workspace repository."""
+    versions = []
+    for commit_hash in reversed(commits):
+        meta = _run(["show", "-s", "--format=%h|%ct|%s", commit_hash], workspace_dir)
+        parts = meta.stdout.strip().split("|", 2)
+        if len(parts) != 3:
+            continue
+        changed = _run(["show", "--name-only", "--format=", commit_hash, "--", file_path], workspace_dir)
+        if not changed.stdout.strip():
+            continue
+        diff = _run(["show", "--format=", commit_hash, "--", file_path], workspace_dir)
+        versions.append({"hash": commit_hash, "shortHash": parts[0], "timestamp": int(parts[1]), "subject": parts[2], "diff": diff.stdout})
+    return versions
+
+
 def file_content_at_commit(workspace_dir: Path, commit_hash: str, file_path: str) -> str | None:
     """Full file content as it existed at a specific commit (for Code
     Canvas's "view full snapshot" mode, not just the diff)."""

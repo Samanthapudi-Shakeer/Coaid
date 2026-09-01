@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { apiPost } from '../api';
+import { apiGet, apiPost } from '../api';
 import { useWorkspaceFilesAndModels } from '../hooks/useWorkspaceFilesAndModels';
 import ToolControls from './ToolControls';
 import DiffView from './DiffView';
 import Toasts from './Toasts';
+import ToolTaskProgress from './ToolTaskProgress';
 
 let toastId = 0;
 
@@ -35,12 +36,25 @@ export default function TestGenPage({ workspaces, currentWorkspace, onSelectWork
       // separate from the Aider Console -- and blocks until Aider actually
       // creates and commits the new test file.
       const res = await apiPost(wsApi('/tasks/testgen'), { path: selectedFile, prompt: prompt.trim() });
+      // The task endpoint only resolves after Aider reports completion. Still
+      // wait for the generated paths to appear in the workspace listing
+      // before telling the user it is ready, avoiding a transient "no file"
+      // UI state on slower filesystems.
+      const generated = (res.changedFiles || []).filter((f) => f.status !== 'D').map((f) => f.path);
+      if (generated.length) {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          const listing = await apiGet(wsApi('/files/workspace'));
+          if (generated.every((path) => listing.files.some((file) => file.path === path))) break;
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
       setResult(res);
       toast(
         res.changedFiles?.length ? 'Test file created and committed' : 'Aider did not create a new file',
         'success'
       );
-      tw.refreshWorkspaceFiles();
+      await tw.refreshWorkspaceFiles();
     } catch (err) {
       toast(err.message, 'error');
     } finally {
@@ -68,6 +82,7 @@ export default function TestGenPage({ workspaces, currentWorkspace, onSelectWork
           file directly — on its own dedicated hidden session, separate from the Aider Console.
         </p>
       </div>
+      <ToolTaskProgress running={running} statusPath={wsApi('/tasks/testgen/status')} />
 
       <ToolControls
         workspaces={workspaces} currentWorkspace={currentWorkspace}
