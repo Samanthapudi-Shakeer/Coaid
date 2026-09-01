@@ -19,6 +19,7 @@ export default function TestGenPage({ workspaces, currentWorkspace, onSelectWork
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [toasts, setToasts] = useState([]);
+  const [terminalEnabled, setTerminalEnabled] = useState(false);
 
   const wsApi = (path) => `/api/ws/${encodeURIComponent(currentWorkspace)}${path}`;
   const toast = (message, kind = 'info') => {
@@ -82,7 +83,8 @@ export default function TestGenPage({ workspaces, currentWorkspace, onSelectWork
           file directly — on its own dedicated hidden session, separate from the Aider Console.
         </p>
       </div>
-      <ToolTaskProgress running={running} statusPath={wsApi('/tasks/testgen/status')} />
+      <label className="terminal-toggle"><input type="checkbox" checked={terminalEnabled} onChange={(e) => setTerminalEnabled(e.target.checked)} /> Show Aider terminal and answer Y/N prompts</label>
+      <ToolTaskProgress running={running} statusPath={wsApi('/tasks/testgen/status')} terminalEnabled={terminalEnabled} />
 
       <ToolControls
         workspaces={workspaces} currentWorkspace={currentWorkspace}

@@ -5,7 +5,7 @@ from typing import List
 from fastapi import FastAPI, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from .config import settings
@@ -13,6 +13,7 @@ from .workspace_manager import WorkspaceManager
 from .workspace_fs import list_workspace_files, list_ignored_files, safe_resolve
 from .ollama_client import get_ollama_models
 from .ollama_tools import run_file_transform
+from .ollama_client import generate_direct
 from .pylint_runner import run_pylint
 from .semgrep_runner import run_semgrep
 from .commands_library import COMMANDS
@@ -111,6 +112,12 @@ class TestGenBody(BaseModel):
 class WriteFileBody(BaseModel):
     path: str
     content: str
+
+
+class FindingBody(BaseModel):
+    path: str
+    model: str = ""
+    finding: dict
 
 
 # --------------------------------------------------------------------------- workspaces
@@ -440,6 +447,58 @@ async def lint_autofix(name: str, body: LintAutofixBody):
     return result
 
 
+@app.post("/api/ws/{name}/lint/explain", dependencies=[Depends(check_auth)])
+async def lint_explain(name: str, body: FindingBody):
+    """Ask Ollama about one finding only; never sends a whole lint report."""
+    model = body.model or get_session(name).status.model
+    finding = body.finding
+    prompt = ("Explain this static-analysis finding clearly and concisely. Include why it matters "
+              "and a safe way to resolve it. Do not propose unrelated changes.\n\n"
+              f"File: {body.path}\nFinding: {finding.get('symbol')}: {finding.get('message')} "
+              f"at line {finding.get('line')}, column {finding.get('column')}.")
+    result = await generate_direct(settings.ollama_api_base, model, prompt)
+    if not result["ok"]:
+        raise HTTPException(status_code=502, detail=f"Ollama request failed: {result.get('error')}")
+    return {"explanation": result["text"], "model": result["model"]}
+
+
+@app.post("/api/ws/{name}/lint/fix-finding", dependencies=[Depends(check_auth)])
+async def lint_fix_finding(name: str, body: FindingBody):
+    """Produce a reviewable diff for exactly one error/refactor with full file context."""
+    workspace_path = wsm.workspace_path(name)
+    try:
+        file_content = safe_resolve(workspace_path, body.path).read_text(errors="replace")
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    f = body.finding
+    instruction = (f"Fix only this {f.get('type', 'analysis')} finding: [{f.get('symbol')}] {f.get('message')} "
+                   f"at line {f.get('line')}, column {f.get('column')}. Preserve behavior and return a complete file.")
+    result = await run_file_transform(settings.ollama_api_base, body.model or get_session(name).status.model,
+                                      file_content, body.path, instruction)
+    if not result["ok"]:
+        raise HTTPException(status_code=502, detail=f"Ollama request failed: {result.get('error')}")
+    return result
+
+
+@app.get("/api/ws/{name}/lint/pylint-report.pdf", dependencies=[Depends(check_auth)])
+async def pylint_report_pdf(name: str, path: str):
+    report = run_pylint(wsm.workspace_path(name), path)
+    if report["error"]:
+        raise HTTPException(status_code=400, detail=report["error"])
+    # A compact, dependency-free PDF report; text is escaped for PDF literals.
+    def esc(value): return str(value).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    lines = [f"Pylint consolidated report", f"Workspace: {name}", f"Project folder: {wsm.workspace_path(name)}", f"Target: {path}", f"Total findings: {len(report['findings'])}", ""]
+    lines += [f"{f['path']}:{f['line']}:{f['column']} [{f['type']}] {f['symbol']} — {f['message']}" for f in report['findings']]
+    lines = lines[:70]
+    stream = "BT /F1 10 Tf 45 780 Td 13 TL " + " ".join(f"({esc(line)}) Tj T*" for line in lines) + " ET"
+    objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>", f"<< /Length {len(stream.encode())} >>\nstream\n{stream}\nendstream", "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>"]
+    pdf = "%PDF-1.4\n"; offsets = [0]
+    for i, obj in enumerate(objects, 1):
+        offsets.append(len(pdf.encode())); pdf += f"{i} 0 obj\n{obj}\nendobj\n"
+    xref = len(pdf.encode()); pdf += f"xref\n0 {len(objects)+1}\n0000000000 65535 f \n" + "".join(f"{o:010d} 00000 n \n" for o in offsets[1:]) + f"trailer << /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF"
+    return Response(pdf.encode(), media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="pylint-report.pdf"'})
+
+
 async def _run_tool_task(name: str, purpose: str, path: str, prompt: str) -> dict:
     """Shared plumbing for the Modularization and Test-Gen tools: get (or
     lazily start) this workspace's dedicated hidden session for `purpose`,
@@ -514,7 +573,20 @@ async def tool_task_status(name: str, purpose: str):
         session = wsm.get_tool_session(name, purpose)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    return session.get_status()
+    status = session.get_status()
+    status["raw"] = session.get_recent_raw_b64()
+    return status
+
+
+@app.post("/api/ws/{name}/tasks/{purpose}/answer", dependencies=[Depends(check_auth)])
+async def tool_task_answer(name: str, purpose: str, body: AnswerBody):
+    if purpose not in ("modularize", "testgen"):
+        raise HTTPException(status_code=400, detail="Unknown tool session.")
+    try:
+        wsm.get_tool_session(name, purpose).answer_question(body.text)
+        return {"ok": True}
+    except (KeyError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/api/ws/{name}/tasks/{purpose}/undo", dependencies=[Depends(check_auth)])

@@ -16,14 +16,16 @@ def _run(args, cwd) -> subprocess.CompletedProcess:
 
 
 def ensure_repo(workspace_dir: Path):
-    if (workspace_dir / ".git").exists():
-        return
-    _run(["init"], workspace_dir)
+    """Initialize or repair the workspace repository without overwriting files/history."""
+    probe = _run(["rev-parse", "--is-inside-work-tree"], workspace_dir)
+    if probe.returncode != 0:
+        _run(["init"], workspace_dir)
     _run(["config", "user.email", "aider-console@localhost"], workspace_dir)
     _run(["config", "user.name", "Aider Console"], workspace_dir)
     # Empty initial commit so `git diff <head>..HEAD` always has a valid
     # base to compare against, even before Aider makes its first commit.
-    _run(["commit", "--allow-empty", "-m", "Initial commit (workspace created)"], workspace_dir)
+    if current_head(workspace_dir) is None:
+        _run(["commit", "--allow-empty", "-m", "Initial commit (workspace created)"], workspace_dir)
 
 
 def current_head(workspace_dir: Path) -> str | None:
