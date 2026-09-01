@@ -1,4 +1,5 @@
 import asyncio
+import base64
 from pathlib import Path
 from typing import List
 
@@ -120,6 +121,10 @@ class FindingBody(BaseModel):
     path: str
     model: str = ""
     finding: dict
+
+
+class RawInputBody(BaseModel):
+    data: str
 
 
 # --------------------------------------------------------------------------- workspaces
@@ -588,6 +593,18 @@ async def tool_task_status(name: str, purpose: str):
     status = session.get_status()
     status["raw"] = session.get_recent_raw_b64()
     return status
+
+
+@app.post("/api/ws/{name}/tasks/{purpose}/raw", dependencies=[Depends(check_auth)])
+async def tool_task_raw(name: str, purpose: str, body: RawInputBody):
+    if purpose not in ("modularize", "testgen", "lintfix"):
+        raise HTTPException(status_code=400, detail="Unknown tool session.")
+    try:
+        data = base64.b64decode(body.data, validate=True)
+        wsm.get_tool_session(name, purpose).write_raw_bytes(data)
+        return {"ok": True}
+    except (ValueError, KeyError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/api/ws/{name}/tasks/{purpose}/prompt", dependencies=[Depends(check_auth)])

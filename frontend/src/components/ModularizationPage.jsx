@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { apiPost, apiUpload } from '../api';
 import { useWorkspaceFilesAndModels } from '../hooks/useWorkspaceFilesAndModels';
 import ToolControls from './ToolControls';
@@ -24,6 +24,13 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
   const [terminalEnabled, setTerminalEnabled] = useState(false);
 
   const wsApi = (path) => `/api/ws/${encodeURIComponent(currentWorkspace)}${path}`;
+  useEffect(() => {
+    if (!currentWorkspace) return;
+    let alive = true;
+    const restore = async () => { try { const status = await apiGet(wsApi('/tasks/modularize/status')); if (alive && status.taskRunning) setRunning(true); } catch (_) { /* session has not been created yet */ } };
+    restore();
+    return () => { alive = false; };
+  }, [currentWorkspace]);
   const toast = (message, kind = 'info') => {
     const id = ++toastId;
     setToasts((t) => [...t, { id, message, kind }]);
@@ -103,6 +110,7 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
           Upload file(s)
           <input type="file" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
         </label>
+        <label className="btn small upload-btn" style={{ width: 'fit-content' }}>Upload folder<input type="file" webkitdirectory="" directory="" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label>
       </div>
 
       <div className="field multi-attach"><label>Attach related files or an entire folder</label><div className="tool-actions"><select value={folder} onChange={(e) => setFolder(e.target.value)}><option value="">Choose folder</option>{[...new Set(tw.workspaceFiles.map((f) => f.path.includes('/') ? f.path.split('/').slice(0, -1).join('/') : '').filter(Boolean))].map((item) => <option key={item} value={item}>{item}/</option>)}</select><button className="btn small" type="button" disabled={!folder} onClick={() => setAttachedPaths(tw.workspaceFiles.filter((f) => f.path.startsWith(`${folder}/`)).map((f) => f.path))}>Attach folder</button></div><div className="attachment-list">{tw.workspaceFiles.map((f) => <label key={f.path}><input type="checkbox" checked={attachedPaths.includes(f.path)} onChange={(e) => setAttachedPaths((old) => e.target.checked ? [...new Set([...old, f.path])] : old.filter((item) => item !== f.path))} /> {f.path}</label>)}</div></div>
