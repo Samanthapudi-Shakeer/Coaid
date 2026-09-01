@@ -120,6 +120,8 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
       {engine === 'sonarqube' && <div className="tool-controls"><div className="field"><label>SonarQube URL</label><input value={sonar.url} onChange={(e) => setSonar({ ...sonar, url: e.target.value })} placeholder="https://sonar.company.com" /></div><div className="field"><label>Token</label><input type="password" value={sonar.token} onChange={(e) => setSonar({ ...sonar, token: e.target.value })} /></div><div className="field"><label>Project key</label><input value={sonar.project} onChange={(e) => setSonar({ ...sonar, project: e.target.value })} /></div></div>}
 
       <div className="tool-actions">
+        <label className="btn small upload-btn">Upload file(s)<input type="file" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label>
+        <label className="btn small upload-btn">Upload folder<input type="file" webkitdirectory="" directory="" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label>
         <button className="btn primary" onClick={analyze} disabled={!target || analyzing}>
           {analyzing ? 'Analyzing…' : `▶ Run ${engine}`}
         </button>
