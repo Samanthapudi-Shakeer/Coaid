@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { apiPost } from '../api';
+import { apiGet, apiPost, apiUpload } from '../api';
 import { useWorkspaceFilesAndModels } from '../hooks/useWorkspaceFilesAndModels';
 import ToolControls from './ToolControls';
 import DiffView from './DiffView';
@@ -20,6 +20,9 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
   const [fixResult, setFixResult] = useState(null);
   const [saveOpen, setSaveOpen] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [source, setSource] = useState(null);
+  const [aiResult, setAiResult] = useState(null);
+  const [aiBusy, setAiBusy] = useState(false);
 
   const wsApi = (path) => `/api/ws/${encodeURIComponent(currentWorkspace)}${path}`;
   const toast = (message, kind = 'info') => {
@@ -27,6 +30,12 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
     setToasts((t) => [...t, { id, message, kind }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
   };
+
+  async function handleUpload(fileList) {
+    if (!fileList?.length || !currentWorkspace) return;
+    try { const form = new FormData(); [...fileList].forEach((file) => form.append('files', file)); const body = await apiUpload(wsApi('/upload'), form); await tw.refreshWorkspaceFiles(); setTarget(body.uploaded[0]?.name || ''); toast(`Uploaded ${body.uploaded.length} file(s)`, 'success'); }
+    catch (err) { toast(err.message, 'error'); }
+  }
 
   async function analyze() {
     if (!target) return;
@@ -69,6 +78,22 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
     }
   }
 
+  async function showLocation(finding) {
+    try { const data = await apiGet(wsApi(`/files/raw/${finding.path || target}`)); const line = Number(finding.line || 1); const rows = data.content.split('\n'); setSource({ path: finding.path || target, line, start: Math.max(1, line - 3), rows: rows.slice(Math.max(0, line - 4), line + 3) }); }
+    catch (err) { toast(err.message, 'error'); }
+  }
+  async function askAi(finding) {
+    setAiBusy(true); setAiResult(null);
+    try { const data = await apiPost(wsApi('/lint/explain'), { path: finding.path || target, model: selectedModel, finding }); setAiResult({ kind: 'Explanation', ...data }); }
+    catch (err) { toast(err.message, 'error'); } finally { setAiBusy(false); }
+  }
+  async function fixFinding(finding) {
+    setAiBusy(true); setAiResult(null);
+    try { const data = await apiPost(wsApi('/lint/fix-finding'), { path: finding.path || target, model: selectedModel, finding }); setAiResult({ kind: 'Proposed fix', ...data, path: finding.path || target }); }
+    catch (err) { toast(err.message, 'error'); } finally { setAiBusy(false); }
+  }
+  function downloadPylintReport() { window.open(`${wsApi('/lint/pylint-report.pdf')}?path=${encodeURIComponent(target)}`, '_blank', 'noopener,noreferrer'); }
+
   const folders = [...new Set(tw.workspaceFiles
     .map((f) => f.path.split('/').slice(0, -1).join('/'))
     .filter(Boolean))];
@@ -97,6 +122,8 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
       </div>
 
       <div className="tool-actions">
+        <label className="btn small upload-btn">Upload file(s)<input type="file" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label>
+        <label className="btn small upload-btn">Upload folder<input type="file" webkitdirectory="" directory="" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label>
         <button className="btn primary" onClick={analyze} disabled={!target || analyzing}>
           {analyzing ? 'Analyzing…' : `▶ Run ${engine}`}
         </button>
@@ -110,6 +137,7 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
               <div className="finding-filters" aria-label="Filter findings">
                 {['error', 'warning', 'refactor'].map((type) => <label key={type}><input type="checkbox" checked={filters[type]} onChange={(e) => setFilters((old) => ({ ...old, [type]: e.target.checked }))} /> {type}s</label>)}
               </div>
+              {engine === 'pylint' && findings.length > 0 && <button className="btn small" onClick={downloadPylintReport}>↓ Pylint PDF report</button>}
               {findings.length > 0 && !target.endsWith('/') && (
                 <button className="btn small primary" onClick={autofix} disabled={fixing || !selectedModel || engine !== 'pylint'} title={engine !== 'pylint' ? 'Auto-fix uses pylint findings' : ''}>
                   {fixing ? 'Fixing…' : '✨ Auto-fix with Ollama'}
@@ -123,9 +151,13 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
                 {visibleFindings.map((f, i) => (
                   <li key={i} className={`finding-${f.type}`}>
                     <span className="finding-badge">{f.type}</span>
-                    <span className="mono small">{f.path && `${f.path} `}L{f.line}:{f.column}</span>
+                    <button className="mono small finding-location" onClick={() => showLocation(f)} title="Open source at this location">{f.path && `${f.path} `}L{f.line}:{f.column}</button>
                     <span className="finding-symbol mono">{f.symbol}</span>
                     <span className="finding-msg">{f.message}</span>
+                    <span className="finding-actions">
+                      {(f.type === 'error' || f.type === 'fatal') && <button className="btn small" disabled={aiBusy || !selectedModel} onClick={() => askAi(f)}>Ask AI</button>}
+                      {(f.type === 'error' || f.type === 'fatal' || f.type === 'refactor') && <button className="btn small" disabled={aiBusy || !selectedModel} onClick={() => fixFinding(f)}>Fix with AI</button>}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -133,13 +165,16 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
           </div>
         )}
 
+        {source && <div className="tool-card"><div className="tool-card-header"><span>{source.path} — lines {source.start}–{source.start + source.rows.length - 1}</span><button className="btn small" onClick={() => setSource(null)}>Close</button></div><pre className="source-preview">{source.rows.map((line, index) => `${String(source.start + index).padStart(5)} ${line}`).join('\n')}</pre></div>}
+        {aiResult && <div className="tool-card"><div className="tool-card-header"><span>{aiResult.kind} ({aiResult.model || 'Aider'}){aiResult.committed ? ' — committed review copy' : ''}</span><button className="btn small" onClick={() => setAiResult(null)}>Close</button>{aiResult.changed && <button className="btn small primary" onClick={() => { setFixResult(aiResult); setSaveOpen(true); }}>Review / apply diff</button>}</div>{aiResult.explanation ? <p>{aiResult.explanation}</p> : aiResult.changed ? <DiffView diff={aiResult.diff} /> : <div className="empty">No change was proposed.</div>}</div>}
+
         {fixResult && (
           <div className="tool-card">
             <div className="tool-card-header">
               <span>Proposed fix ({fixResult.model})</span>
               {fixResult.changed && (
                 <>
-                  <button className="btn small primary" onClick={() => save(target)}>✓ Apply to original</button>
+                  <button className="btn small primary" onClick={() => save(fixResult.path || target)}>✓ Apply to original</button>
                   <button className="btn small" onClick={() => setSaveOpen(true)}>Save as…</button>
                 </>
               )}
