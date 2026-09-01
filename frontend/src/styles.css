@@ -720,3 +720,17 @@ select:focus, textarea:focus, input:focus {
 .supervised-file-picker::-webkit-scrollbar-thumb, .phase-timeline::-webkit-scrollbar-thumb {
   background: #c7cdd6; border-radius: 4px;
 }
+.terminal-toggle { display: block; margin: 0 0 12px; font-size: 12px; color: var(--text-dim); }
+.tool-terminal { max-height: 260px; overflow: auto; margin: 12px 0 0; padding: 12px; border-radius: 8px; background: #111827; color: #d1fae5; white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; }
+.tool-human-question { margin-top: 12px; padding: 10px; border-radius: 8px; background: #fff8dc; color: var(--text); display: grid; gap: 8px; }
+.tool-human-question .btn { margin-right: 6px; }
+.tool-answer { display: flex; gap: 6px; }.tool-answer input { flex: 1; }
+.finding-actions { margin-left: auto; display: flex; gap: 5px; flex-shrink: 0; }
+.finding-clickable { cursor: pointer; }.finding-location { color: var(--accent); text-decoration: underline; }
+.source-preview { max-height: 280px; overflow: auto; white-space: pre; background: var(--panel-2); padding: 10px; border-radius: 8px; }
+.multi-attach { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.attachment-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px 14px; max-height: 160px; overflow: auto; margin-top: 10px; font: 12px var(--mono); color: var(--text-dim); }
+.attachment-list label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-aider-console { margin-top: 14px; border: 1px solid #293241; overflow: hidden; border-radius: 10px; background: #1b1f27; }
+.tool-aider-console .terminal-view { height: 360px; }.tool-aider-console .composer { margin: 0; border-radius: 0; }.tool-terminal-toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #293241; color: #e7ebef; font-size: 12px; }.tool-terminal-toolbar span { margin-right: auto; color: #b9c2cf; }
+.workspace-folder-button { margin-left: auto; align-self: center; cursor: pointer; color: var(--accent); font-size: 12px; font-weight: 700; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }

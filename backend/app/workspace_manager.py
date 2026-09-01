@@ -109,7 +109,7 @@ class WorkspaceManager:
             mode=self.default_mode,
             broadcast=broadcaster,
             lint_cmd=self.lint_cmd,
-            auto_confirm=True,
+            auto_confirm=False,
         )
         self.tool_sessions[key] = session
         return session

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { apiGet, apiPost } from './api';
+import { apiGet, apiPost, apiUpload } from './api';
 import App from './App.jsx';
 import StaticAnalysisPage from './components/StaticAnalysisPage.jsx';
 import ModularizationPage from './components/ModularizationPage.jsx';
@@ -56,6 +56,13 @@ export default function Shell() {
     if (currentWorkspace) sessionStorage.setItem(CURRENT_WS_KEY, currentWorkspace);
   }, [currentWorkspace]);
 
+  const uploadToWorkspace = async (files) => {
+    if (!currentWorkspace || !files?.length) return;
+    const form = new FormData(); [...files].forEach((file) => form.append('files', file));
+    await apiUpload(`/api/ws/${encodeURIComponent(currentWorkspace)}/upload`, form);
+    window.dispatchEvent(new Event('workspace-files-changed'));
+  };
+
   const workspaceProps = {
     workspaces,
     currentWorkspace,
@@ -76,12 +83,15 @@ export default function Shell() {
             {p.label}
           </button>
         ))}
+        <label className="workspace-folder-button" title="Add files or a folder to the selected workspace">📁 Workspace<input type="file" multiple hidden onChange={(e) => { uploadToWorkspace(e.target.files).catch(() => {}); e.target.value = ''; }} /></label>
       </nav>
       <div className="shell-body">
-        {page === 'aider' && <App {...workspaceProps} />}
-        {page === 'static-analysis' && <StaticAnalysisPage {...workspaceProps} />}
-        {page === 'modularize' && <ModularizationPage {...workspaceProps} />}
-        {page === 'testgen' && <TestGenPage {...workspaceProps} />}
+        {/* Keep every section mounted. Switching tabs must not cancel requests,
+            discard tool progress, or create a fresh isolated Aider session. */}
+        <div hidden={page !== 'aider'}><App {...workspaceProps} /></div>
+        <div hidden={page !== 'static-analysis'}><StaticAnalysisPage {...workspaceProps} /></div>
+        <div hidden={page !== 'modularize'}><ModularizationPage {...workspaceProps} /></div>
+        <div hidden={page !== 'testgen'}><TestGenPage {...workspaceProps} /></div>
       </div>
     </div>
   );
