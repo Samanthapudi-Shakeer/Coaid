@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { apiPost, apiUpload } from '../api';
+import { apiGet, apiPost, apiUpload } from '../api';
 import { useWorkspaceFilesAndModels } from '../hooks/useWorkspaceFilesAndModels';
 import ToolControls from './ToolControls';
 import DiffView from './DiffView';
@@ -21,7 +21,7 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [toasts, setToasts] = useState([]);
-  const [terminalEnabled, setTerminalEnabled] = useState(false);
+  const [terminalEnabled, setTerminalEnabled] = useState(true);
 
   const wsApi = (path) => `/api/ws/${encodeURIComponent(currentWorkspace)}${path}`;
   useEffect(() => {
@@ -45,7 +45,7 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
       const body = await apiUpload(wsApi('/upload'), form);
       toast(`Uploaded ${body.uploaded.length} file(s)`, 'success');
       await tw.refreshWorkspaceFiles();
-      if (body.uploaded[0]) setSelectedFile(body.uploaded[0].name);
+      const paths = body.uploaded.map((file) => file.name); if (paths[0]) setSelectedFile(paths[0]); setAttachedPaths(paths);
     } catch (err) {
       toast(err.message, 'error');
     }
@@ -55,6 +55,7 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
     if (!selectedFile || !prompt.trim()) return;
     setRunning(true);
     setResult(null);
+    let keepRunning = false;
     try {
       // This runs on a dedicated, hidden Aider session for this workspace --
       // separate from whatever's happening in the Aider Console -- and
@@ -67,9 +68,11 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
       );
       tw.refreshWorkspaceFiles();
     } catch (err) {
-      toast(err.message, 'error');
+      keepRunning = /already running/i.test(err.message);
+      if (keepRunning) toast('This Aider task is already running. Reconnected to its terminal.', 'info');
+      else toast(err.message, 'error');
     } finally {
-      setRunning(false);
+      if (!keepRunning) setRunning(false);
     }
   }
 

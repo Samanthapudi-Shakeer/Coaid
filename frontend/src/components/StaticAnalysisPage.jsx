@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { apiGet, apiPost } from '../api';
+import { apiGet, apiPost, apiUpload } from '../api';
 import { useWorkspaceFilesAndModels } from '../hooks/useWorkspaceFilesAndModels';
 import ToolControls from './ToolControls';
 import DiffView from './DiffView';
@@ -30,6 +30,12 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
     setToasts((t) => [...t, { id, message, kind }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
   };
+
+  async function handleUpload(fileList) {
+    if (!fileList?.length || !currentWorkspace) return;
+    try { const form = new FormData(); [...fileList].forEach((file) => form.append('files', file)); const body = await apiUpload(wsApi('/upload'), form); await tw.refreshWorkspaceFiles(); setTarget(body.uploaded[0]?.name || ''); toast(`Uploaded ${body.uploaded.length} file(s)`, 'success'); }
+    catch (err) { toast(err.message, 'error'); }
+  }
 
   async function analyze() {
     if (!target) return;
@@ -116,6 +122,8 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
       </div>
 
       <div className="tool-actions">
+        <label className="btn small upload-btn">Upload file(s)<input type="file" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label>
+        <label className="btn small upload-btn">Upload folder<input type="file" webkitdirectory="" directory="" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label>
         <button className="btn primary" onClick={analyze} disabled={!target || analyzing}>
           {analyzing ? 'Analyzing…' : `▶ Run ${engine}`}
         </button>

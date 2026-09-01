@@ -21,7 +21,7 @@ export default function TestGenPage({ workspaces, currentWorkspace, onSelectWork
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [toasts, setToasts] = useState([]);
-  const [terminalEnabled, setTerminalEnabled] = useState(false);
+  const [terminalEnabled, setTerminalEnabled] = useState(true);
 
   const wsApi = (path) => `/api/ws/${encodeURIComponent(currentWorkspace)}${path}`;
   useEffect(() => {
@@ -47,6 +47,7 @@ export default function TestGenPage({ workspaces, currentWorkspace, onSelectWork
     if (!selectedFile || !prompt.trim()) return;
     setRunning(true);
     setResult(null);
+    let keepRunning = false;
     try {
       // Runs on a dedicated, hidden Aider session for this workspace --
       // separate from the Aider Console -- and blocks until Aider actually
@@ -72,9 +73,11 @@ export default function TestGenPage({ workspaces, currentWorkspace, onSelectWork
       );
       await tw.refreshWorkspaceFiles();
     } catch (err) {
-      toast(err.message, 'error');
+      keepRunning = /already running/i.test(err.message);
+      if (keepRunning) toast('This Aider task is already running. Reconnected to its terminal.', 'info');
+      else toast(err.message, 'error');
     } finally {
-      setRunning(false);
+      if (!keepRunning) setRunning(false);
     }
   }
 
