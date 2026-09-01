@@ -14,6 +14,7 @@ from .workspace_fs import list_workspace_files, list_ignored_files, safe_resolve
 from .ollama_client import get_ollama_models
 from .ollama_tools import run_file_transform
 from .pylint_runner import run_pylint
+from .semgrep_runner import run_semgrep
 from .commands_library import COMMANDS
 
 app = FastAPI(title="Remote Aider Console")
@@ -87,6 +88,7 @@ class TaskBody(BaseModel):
 
 class LintAnalyzeBody(BaseModel):
     path: str
+    engine: str = "semgrep"
 
 
 class LintAutofixBody(BaseModel):
@@ -382,11 +384,14 @@ async def stop_task(name: str):
 # --------------------------------------------------------------------------- static analysis (pylint, direct -- no Aider)
 @app.post("/api/ws/{name}/lint/analyze", dependencies=[Depends(check_auth)])
 async def lint_analyze(name: str, body: LintAnalyzeBody):
-    """Runs pylint directly as a subprocess. Deliberately NOT routed through
-    Aider -- this is a plain static-analysis tool call, no LLM involved."""
-    result = run_pylint(wsm.workspace_path(name), body.path)
+    """Run only a static analyzer; no LLM or Aider is involved."""
+    if body.engine not in ("semgrep", "pylint"):
+        raise HTTPException(status_code=400, detail="engine must be semgrep or pylint")
+    runner = run_semgrep if body.engine == "semgrep" else run_pylint
+    result = runner(wsm.workspace_path(name), body.path)
     if result["error"]:
         raise HTTPException(status_code=400, detail=result["error"])
+    result["engine"] = body.engine
     return result
 
 
@@ -455,7 +460,15 @@ async def _run_tool_task(name: str, purpose: str, path: str, prompt: str) -> dic
 
     if not session.is_running():
         session.start()
-        await asyncio.sleep(1.5)  # let boot chatter settle before sending the task
+        # Do not submit work while Aider is still emitting its startup/chat-mode
+        # output: its silence callback can otherwise complete the new task
+        # before the model has received it.
+        for _ in range(60):
+            if session.get_status()["status"] == "idle":
+                break
+            await asyncio.sleep(0.25)
+        else:
+            raise HTTPException(status_code=504, detail="Aider did not become ready in time.")
 
     try:
         session.start_task(prompt, [path])
@@ -488,6 +501,20 @@ async def task_testgen(name: str, body: TestGenBody):
     Asks Aider to create a NEW test file rather than modifying the source."""
     prompt = f"Create a NEW test file for `{body.path}` (do not modify the original file). {body.prompt}"
     return await _run_tool_task(name, "testgen", body.path, prompt)
+
+
+@app.get("/api/ws/{name}/tasks/{purpose}/status", dependencies=[Depends(check_auth)])
+async def tool_task_status(name: str, purpose: str):
+    """Polling endpoint for the hidden tool sessions. The visible console
+    socket is intentionally separate, so Modularization and Test Generation
+    use this endpoint to render live Aider phases while their request waits."""
+    if purpose not in ("modularize", "testgen"):
+        raise HTTPException(status_code=400, detail="Unknown tool session.")
+    try:
+        session = wsm.get_tool_session(name, purpose)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return session.get_status()
 
 
 @app.post("/api/ws/{name}/tasks/{purpose}/undo", dependencies=[Depends(check_auth)])

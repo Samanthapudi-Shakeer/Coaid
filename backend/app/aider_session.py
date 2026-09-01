@@ -42,11 +42,13 @@ QUESTION_RE = re.compile(
     r"(?P<opts>(?:\([A-Za-z]\)[A-Za-z' ]+(?:/\s*)?)+)?"
     r"(?:\[[A-Za-z]+\])?\s*:?\s*$"
 )
+IDLE_PROMPT_RE = re.compile(r"(?:^|\n)>\s*$")
 OPTION_RE = re.compile(r"\(([A-Za-z])\)([A-Za-z' ]+)")
 
 # Heuristic phase classifier for Supervised Mode's "what is it doing right
 # now" indicator. Order matters -- first match wins.
 PHASE_PATTERNS = [
+    (re.compile(r"analy[sz]ing|planning|thinking", re.I), "Analyzing requested changes"),
     (re.compile(r"scanning|repo.?map|building.*map", re.I), "Scanning the repository"),
     (re.compile(r"searching web|fetching url", re.I), "Fetching web content"),
     (re.compile(r"add(ed|ing).+to the chat", re.I), "Attaching files"),
@@ -196,6 +198,12 @@ class AiderSession:
         self._task_done_event: Optional[asyncio.Event] = None
         self._last_task_diff: Optional[dict] = None
         self._session_head_start: Optional[str] = None
+        self._recorded_head: Optional[str] = None
+        # Commit ids are recorded at each completion boundary for this
+        # particular process. This is deliberately separate from repository
+        # history because the three Aider processes share a worktree.
+        self._session_commits: list[str] = []
+        self.phase_timeline: list[dict] = []
         self._task_files: list[str] = []
         self.file_progress: dict[str, str] = {}  # path -> pending|editing|done
         # True only while Aider is actually working on something we sent it
@@ -216,7 +224,9 @@ class AiderSession:
 
     def get_status(self) -> dict:
         self.status.attached_files = sorted(self.attached_files)
-        return self.status.to_dict()
+        data = self.status.to_dict()
+        data["phaseTimeline"] = list(self.phase_timeline)
+        return data
 
     def get_context_stats(self) -> dict:
         total_bytes = 0
@@ -243,7 +253,10 @@ class AiderSession:
         self.modified_files = {}
         self._task_files = []
         self.file_progress = {}
+        self.phase_timeline = []
         self._session_head_start = git_utils.current_head(Path(self.workspace_dir))
+        self._recorded_head = self._session_head_start
+        self._session_commits = []
 
         args = [self.aider_bin, "--model", self.status.model, "--no-pretty", "--no-check-update"]
         if self.lint_cmd:
@@ -471,6 +484,20 @@ class AiderSession:
         if progress_changed:
             self._schedule(self.broadcast({"type": "file_progress", "data": dict(self.file_progress)}))
 
+    def _record_session_commits(self):
+        """Capture commits produced since this session's last idle boundary.
+        Other Aider processes can commit to the same repository, so this
+        narrow capture is what gives Code Canvas process/session isolation."""
+        if not self._recorded_head:
+            return
+        commits = git_utils.log_since(Path(self.workspace_dir), self._recorded_head)
+        if commits:
+            # log_since is newest first; retain chronological insertion order.
+            for entry in reversed(commits):
+                if entry["hash"] not in self._session_commits:
+                    self._session_commits.append(entry["hash"])
+        self._recorded_head = git_utils.current_head(Path(self.workspace_dir))
+
     def get_modified_files(self) -> list[dict]:
         return sorted(self.modified_files.values(), key=lambda e: e["path"])
 
@@ -479,7 +506,7 @@ class AiderSession:
         `file_path`, each with that commit's diff for just this file."""
         if not self._session_head_start:
             return []
-        return git_utils.file_versions(Path(self.workspace_dir), self._session_head_start, file_path)
+        return git_utils.file_versions_for_commits(Path(self.workspace_dir), self._session_commits, file_path)
 
     def get_file_content_at(self, file_path: str, commit_hash: str) -> Optional[str]:
         return git_utils.file_content_at_commit(Path(self.workspace_dir), commit_hash, file_path)
@@ -507,6 +534,7 @@ class AiderSession:
         )
         self.status.task_running = False
         self.status.status = "idle"
+        self._record_session_commits()
         self._update_modified_files_log()
         self._last_task_diff = diff
         if self._task_done_event:
@@ -550,6 +578,9 @@ class AiderSession:
 
         for pattern, label in PHASE_PATTERNS:
             if pattern.search(clean):
+                if not self.phase_timeline or self.phase_timeline[-1]["label"] != label:
+                    self.phase_timeline.append({"label": label, "at": time.time()})
+                    self.phase_timeline = self.phase_timeline[-20:]
                 self._schedule(self.broadcast({"type": "phase", "data": label}))
                 break
 
@@ -609,11 +640,19 @@ class AiderSession:
 
         self._processing = False
         if self.status.task_running:
-            self._complete_task()
+            # A short silent gap is normal while a local model is thinking.
+            # Hidden tool tasks must not return "no file generated" merely
+            # because that gap happened before Aider finished. A committed
+            # edit is authoritative; for a legitimate no-op we also accept
+            # Aider's plain idle prompt.
+            head_changed = self._task_head_before and git_utils.current_head(Path(self.workspace_dir)) != self._task_head_before
+            if head_changed or IDLE_PROMPT_RE.search(self._clean_tail):
+                self._complete_task()
             return
 
         if self.status.status in ("running", "starting"):
             self.status.status = "idle"
+            self._record_session_commits()
             self._update_modified_files_log()
         self._schedule(self.broadcast({"type": "status", "data": self.get_status()}))
 

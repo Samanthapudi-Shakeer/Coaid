@@ -9,11 +9,16 @@ import json
 import subprocess
 from pathlib import Path
 
+from .workspace_fs import safe_resolve
+
 
 def run_pylint(workspace_dir: Path, file_path: str, timeout: int = 30) -> dict:
-    abs_path = workspace_dir / file_path
-    if not abs_path.is_file():
-        return {"findings": [], "raw": "", "error": f"File not found: {file_path}"}
+    try:
+        abs_path = safe_resolve(workspace_dir, file_path)
+    except ValueError as exc:
+        return {"findings": [], "raw": "", "error": str(exc)}
+    if not abs_path.exists() or not (abs_path.is_file() or abs_path.is_dir()):
+        return {"findings": [], "raw": "", "error": f"Path not found: {file_path}"}
 
     try:
         res = subprocess.run(
@@ -31,6 +36,7 @@ def run_pylint(workspace_dir: Path, file_path: str, timeout: int = 30) -> dict:
         data = json.loads(res.stdout) if res.stdout.strip() else []
         for item in data:
             findings.append({
+                "path": str(Path(item.get("path", file_path)).relative_to(workspace_dir)) if Path(item.get("path", file_path)).is_absolute() else item.get("path", file_path),
                 "line": item.get("line"),
                 "column": item.get("column"),
                 "type": item.get("type"),       # convention|refactor|warning|error|fatal
