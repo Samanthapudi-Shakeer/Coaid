@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { apiGet, apiPost, apiUpload } from '../api';
+import { apiGet, apiPost } from '../api';
 import { useWorkspaceFilesAndModels } from '../hooks/useWorkspaceFilesAndModels';
 import ToolControls from './ToolControls';
 import DiffView from './DiffView';
@@ -37,19 +37,6 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
   };
 
-  async function handleUpload(fileList) {
-    if (!fileList || fileList.length === 0 || !currentWorkspace) return;
-    try {
-      const form = new FormData();
-      for (const f of fileList) form.append('files', f);
-      const body = await apiUpload(wsApi('/upload'), form);
-      toast(`Uploaded ${body.uploaded.length} file(s)`, 'success');
-      await tw.refreshWorkspaceFiles();
-      const paths = body.uploaded.map((file) => file.name); if (paths[0]) setSelectedFile(paths[0]); setAttachedPaths(paths);
-    } catch (err) {
-      toast(err.message, 'error');
-    }
-  }
 
   async function run() {
     if (!selectedFile || !prompt.trim()) return;
@@ -103,18 +90,12 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
       <ToolControls
         workspaces={workspaces} currentWorkspace={currentWorkspace}
         onSelectWorkspace={onSelectWorkspace} onCreateWorkspace={onCreateWorkspace}
-        workspaceFiles={tw.workspaceFiles} selectedFile={selectedFile} onSelectFile={setSelectedFile}
+        workspaceFiles={tw.workspaceFiles} selectedFile={selectedFile} onSelectFile={setSelectedFile} selectedFiles={attachedPaths} onSelectFiles={(paths) => { setAttachedPaths(paths); setSelectedFile(paths[0] || ''); }}
         showModel={false}
       />
 
-      <div className="field">
-        <label>Or upload a new file</label>
-        <label className="btn small upload-btn" style={{ width: 'fit-content' }}>
-          Upload file(s)
-          <input type="file" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} />
-        </label>
-        <label className="btn small upload-btn" style={{ width: 'fit-content' }}>Upload folder<input type="file" webkitdirectory="" directory="" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label>
-      </div>
+
+      <div className="field multi-attach"><label>Attach related files or an entire folder</label><div className="tool-actions"><select value={folder} onChange={(e) => setFolder(e.target.value)}><option value="">Choose folder</option>{[...new Set(tw.workspaceFiles.map((f) => f.path.includes('/') ? f.path.split('/').slice(0, -1).join('/') : '').filter(Boolean))].map((item) => <option key={item} value={item}>{item}/</option>)}</select><button className="btn small" type="button" disabled={!folder} onClick={() => setAttachedPaths(tw.workspaceFiles.filter((f) => f.path.startsWith(`${folder}/`)).map((f) => f.path))}>Attach folder</button></div><div className="attachment-list">{tw.workspaceFiles.map((f) => <label key={f.path}><input type="checkbox" checked={attachedPaths.includes(f.path)} onChange={(e) => setAttachedPaths((old) => e.target.checked ? [...new Set([...old, f.path])] : old.filter((item) => item !== f.path))} /> {f.path}</label>)}</div></div>
 
       <div className="field multi-attach"><label>Attach related files or an entire folder</label><div className="tool-actions"><select value={folder} onChange={(e) => setFolder(e.target.value)}><option value="">Choose folder</option>{[...new Set(tw.workspaceFiles.map((f) => f.path.includes('/') ? f.path.split('/').slice(0, -1).join('/') : '').filter(Boolean))].map((item) => <option key={item} value={item}>{item}/</option>)}</select><button className="btn small" type="button" disabled={!folder} onClick={() => setAttachedPaths(tw.workspaceFiles.filter((f) => f.path.startsWith(`${folder}/`)).map((f) => f.path))}>Attach folder</button></div><div className="attachment-list">{tw.workspaceFiles.map((f) => <label key={f.path}><input type="checkbox" checked={attachedPaths.includes(f.path)} onChange={(e) => setAttachedPaths((old) => e.target.checked ? [...new Set([...old, f.path])] : old.filter((item) => item !== f.path))} /> {f.path}</label>)}</div></div>
 

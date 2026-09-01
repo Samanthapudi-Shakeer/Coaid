@@ -3,7 +3,7 @@ import WorkspaceBar from './WorkspaceBar';
 
 export default function ToolControls({
   workspaces, currentWorkspace, onSelectWorkspace, onCreateWorkspace,
-  workspaceFiles, selectedFile, onSelectFile,
+  workspaceFiles, selectedFile, onSelectFile, selectedFiles, onSelectFiles,
   models, selectedModel, onSelectModel, showModel = true,
 }) {
   return (

@@ -17,6 +17,7 @@ from .ollama_tools import run_file_transform
 from .ollama_client import generate_direct
 from .pylint_runner import run_pylint
 from .semgrep_runner import run_semgrep
+from .sonarqube_runner import run_sonarqube
 from .commands_library import COMMANDS
 
 app = FastAPI(title="Remote Aider Console")
@@ -91,6 +92,9 @@ class TaskBody(BaseModel):
 class LintAnalyzeBody(BaseModel):
     path: str
     engine: str = "semgrep"
+    sonarUrl: str = ""
+    sonarToken: str = ""
+    sonarProject: str = ""
 
 
 class LintAutofixBody(BaseModel):
@@ -399,10 +403,13 @@ async def stop_task(name: str):
 @app.post("/api/ws/{name}/lint/analyze", dependencies=[Depends(check_auth)])
 async def lint_analyze(name: str, body: LintAnalyzeBody):
     """Run only a static analyzer; no LLM or Aider is involved."""
-    if body.engine not in ("semgrep", "pylint"):
-        raise HTTPException(status_code=400, detail="engine must be semgrep or pylint")
-    runner = run_semgrep if body.engine == "semgrep" else run_pylint
-    result = runner(wsm.workspace_path(name), body.path)
+    if body.engine not in ("semgrep", "pylint", "sonarqube"):
+        raise HTTPException(status_code=400, detail="engine must be semgrep, pylint, or sonarqube")
+    if body.engine == "sonarqube":
+        result = await run_sonarqube(body.sonarUrl, body.sonarToken, body.sonarProject)
+    else:
+        runner = run_semgrep if body.engine == "semgrep" else run_pylint
+        result = runner(wsm.workspace_path(name), body.path)
     if result["error"]:
         raise HTTPException(status_code=400, detail=result["error"])
     result["engine"] = body.engine

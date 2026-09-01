@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { apiGet, apiPost, apiUpload } from '../api';
+import { apiGet, apiPost } from '../api';
 import { useWorkspaceFilesAndModels } from '../hooks/useWorkspaceFilesAndModels';
 import ToolControls from './ToolControls';
 import DiffView from './DiffView';
@@ -12,6 +12,7 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
   const tw = useWorkspaceFilesAndModels(currentWorkspace);
   const [selectedModel, setSelectedModel] = useState('');
   const [engine, setEngine] = useState('semgrep');
+  const [sonar, setSonar] = useState({ url: '', token: '', project: '' });
   const [target, setTarget] = useState('');
   const [filters, setFilters] = useState({ error: true, warning: true, refactor: true });
   const [analyzing, setAnalyzing] = useState(false);
@@ -31,11 +32,6 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
   };
 
-  async function handleUpload(fileList) {
-    if (!fileList?.length || !currentWorkspace) return;
-    try { const form = new FormData(); [...fileList].forEach((file) => form.append('files', file)); const body = await apiUpload(wsApi('/upload'), form); await tw.refreshWorkspaceFiles(); setTarget(body.uploaded[0]?.name || ''); toast(`Uploaded ${body.uploaded.length} file(s)`, 'success'); }
-    catch (err) { toast(err.message, 'error'); }
-  }
 
   async function analyze() {
     if (!target) return;
@@ -43,7 +39,7 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
     setFindings(null);
     setFixResult(null);
     try {
-      const result = await apiPost(wsApi('/lint/analyze'), { path: target, engine });
+      const result = await apiPost(wsApi('/lint/analyze'), { path: target, engine, sonarUrl: sonar.url, sonarToken: sonar.token, sonarProject: sonar.project });
       setFindings(result.findings);
       toast(`Found ${result.findings.length} issue(s)`, result.findings.length ? 'info' : 'success');
     } catch (err) {
@@ -117,9 +113,11 @@ export default function StaticAnalysisPage({ workspaces, currentWorkspace, onSel
       />
 
       <div className="tool-controls">
-        <div className="field"><label>Analyzer</label><select value={engine} onChange={(e) => setEngine(e.target.value)}><option value="semgrep">Semgrep</option><option value="pylint">Pylint</option></select></div>
+        <div className="field"><label>Analyzer</label><select value={engine} onChange={(e) => setEngine(e.target.value)}><option value="semgrep">Semgrep</option><option value="pylint">Pylint</option><option value="sonarqube">SonarQube</option></select></div>
         <div className="field"><label>Or analyze folder</label><select value={target} onChange={(e) => setTarget(e.target.value)}><option value="">Select a file or folder</option>{folders.map((folder) => <option key={folder} value={`${folder}/`}>{folder}/</option>)}</select></div>
       </div>
+
+      {engine === 'sonarqube' && <div className="tool-controls"><div className="field"><label>SonarQube URL</label><input value={sonar.url} onChange={(e) => setSonar({ ...sonar, url: e.target.value })} placeholder="https://sonar.company.com" /></div><div className="field"><label>Token</label><input type="password" value={sonar.token} onChange={(e) => setSonar({ ...sonar, token: e.target.value })} /></div><div className="field"><label>Project key</label><input value={sonar.project} onChange={(e) => setSonar({ ...sonar, project: e.target.value })} /></div></div>}
 
       <div className="tool-actions">
         <label className="btn small upload-btn">Upload file(s)<input type="file" multiple hidden onChange={(e) => { handleUpload(e.target.files); e.target.value = ''; }} /></label>
