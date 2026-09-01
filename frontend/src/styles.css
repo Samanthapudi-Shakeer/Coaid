@@ -720,3 +720,11 @@ select:focus, textarea:focus, input:focus {
 .supervised-file-picker::-webkit-scrollbar-thumb, .phase-timeline::-webkit-scrollbar-thumb {
   background: #c7cdd6; border-radius: 4px;
 }
+.terminal-toggle { display: block; margin: 0 0 12px; font-size: 12px; color: var(--text-dim); }
+.tool-terminal { max-height: 260px; overflow: auto; margin: 12px 0 0; padding: 12px; border-radius: 8px; background: #111827; color: #d1fae5; white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; }
+.tool-human-question { margin-top: 12px; padding: 10px; border-radius: 8px; background: #fff8dc; color: var(--text); display: grid; gap: 8px; }
+.tool-human-question .btn { margin-right: 6px; }
+.tool-answer { display: flex; gap: 6px; }.tool-answer input { flex: 1; }
+.finding-actions { margin-left: auto; display: flex; gap: 5px; flex-shrink: 0; }
+.finding-clickable { cursor: pointer; }.finding-location { color: var(--accent); text-decoration: underline; }
+.source-preview { max-height: 280px; overflow: auto; white-space: pre; background: var(--panel-2); padding: 10px; border-radius: 8px; }

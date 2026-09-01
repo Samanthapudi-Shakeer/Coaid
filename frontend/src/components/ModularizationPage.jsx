@@ -19,6 +19,7 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [toasts, setToasts] = useState([]);
+  const [terminalEnabled, setTerminalEnabled] = useState(false);
 
   const wsApi = (path) => `/api/ws/${encodeURIComponent(currentWorkspace)}${path}`;
   const toast = (message, kind = 'info') => {
@@ -84,7 +85,8 @@ export default function ModularizationPage({ workspaces, currentWorkspace, onSel
           it never interrupts anything you have running there.
         </p>
       </div>
-      <ToolTaskProgress running={running} statusPath={wsApi('/tasks/modularize/status')} />
+      <label className="terminal-toggle"><input type="checkbox" checked={terminalEnabled} onChange={(e) => setTerminalEnabled(e.target.checked)} /> Show Aider terminal and answer Y/N prompts</label>
+      <ToolTaskProgress running={running} statusPath={wsApi('/tasks/modularize/status')} terminalEnabled={terminalEnabled} />
 
       <ToolControls
         workspaces={workspaces} currentWorkspace={currentWorkspace}
