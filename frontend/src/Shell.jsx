@@ -56,12 +56,7 @@ export default function Shell() {
     if (currentWorkspace) sessionStorage.setItem(CURRENT_WS_KEY, currentWorkspace);
   }, [currentWorkspace]);
 
-  const uploadToWorkspace = async (files) => {
-    if (!currentWorkspace || !files?.length) return;
-    const form = new FormData(); [...files].forEach((file) => form.append('files', file));
-    await apiUpload(`/api/ws/${encodeURIComponent(currentWorkspace)}/upload`, form);
-    window.dispatchEvent(new Event('workspace-files-changed'));
-  };
+
 
   const workspaceProps = {
     workspaces,
